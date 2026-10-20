@@ -62,6 +62,17 @@ rdc AS (
     FROM ret GROUP BY ftd_week
 ),
 rdc2 AS (SELECT * FROM rdc WHERE ftd_week >= (SELECT MAX(ftd_week) FROM rdc) - 1),
+topwins AS (
+    -- найбільші чисті виграші гравця за день за останні 14 днів (псевдонім замість player_id)
+    SELECT LEFT(encode(sha256(convert_to((SELECT salt FROM ref_salt) || g.player_id, 'UTF8')), 'hex'), 12) AS player_ref,
+           g.activity_date::text AS day,
+           ROUND(SUM(g.win_amount) - SUM(g.real_bet_amount + g.bonus_bet_amount), 0) AS day_net
+    FROM player_game_daily g, asof
+    WHERE g.activity_date > asof.d - 14
+    GROUP BY g.player_id, g.activity_date
+    ORDER BY SUM(g.win_amount) - SUM(g.real_bet_amount + g.bonus_bet_amount) DESC
+    LIMIT 3
+),
 anom AS (
 WITH d AS (
     SELECT report_date, game_category, rtp_pct, ggr
@@ -87,5 +98,6 @@ SELECT json_build_object(
     'period_end', (SELECT d FROM asof)::text,
     'metrics', (SELECT json_agg(m ORDER BY m.metric) FROM metrics m),
     'rdc_d7_by_ftd_week', (SELECT json_agg(r ORDER BY r.ftd_week) FROM rdc2 r),
+    'top_player_day_net_wins', (SELECT json_agg(t) FROM topwins t),
     'rtp_daily_anomalies', COALESCE((SELECT json_agg(x) FROM (SELECT * FROM anom LIMIT 5) x), '[]'::json)
 )::text AS payload;
