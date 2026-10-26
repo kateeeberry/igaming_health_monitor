@@ -1,117 +1,160 @@
+Claude
+/
+rivelk, Connected
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Readme · MD
 # iGaming Health Monitor
-
-Автоматизація в n8n для iGaming-аналітика: **щотижневий звіт про здоров'я проєкту** та **щоденні сповіщення про підозрілу поведінку гравців**. Працює на синтетичних даних, механізм розрахований на перенесення на реальний проєкт.
-
-> Усі дані в цьому репозиторії синтетичні. Жодних реальних гравців, ключів чи підключень тут немає.
-
-## Ключові показники
-
-Три головні показники звіту: **GGR** (дохід), **RTP** (чи тримає гра маржу), **RDC D7** (утримання нових депозиторів). Решта метрик (ставки, кількість ставок, середня ставка, активні гравці, частка бонусів, GGR margin) допоміжні й пояснюють, чому змінились головні.
-
-## Що робить
-
-| Воркфлоу | Розклад | Результат |
+ 
+n8n automation for an iGaming analyst: a **weekly project health report** and **daily alerts about suspicious player behavior**. It runs on synthetic data, and the mechanism is designed to be ported to a real project.
+ 
+> All data in this repository is synthetic. There are no real players, keys or connections here.
+ 
+## Key metrics
+ 
+The report has three main metrics: **GGR** (revenue), **RTP** (whether the game holds its margin) and **RDC D7** (retention of new depositors). The remaining metrics (stakes, bet count, average bet, active players, bonus share, GGR margin) are supporting metrics that explain why the main ones changed.
+ 
+## What it does
+ 
+| Workflow | Schedule | Output |
 |---|---|---|
-| **Weekly health report** | щопонеділка 09:00 | Метрики тиждень проти попереднього (GGR, RTP, ставки, кількість ставок, середня ставка, активні гравці, частка бонусних ставок, GGR margin), RDC D7, аномалії RTP за днями. Також топ-3 найбільших виграші гравців за день (під псевдонімом), щоб відрізнити факт від припущення про причину аномалії. Gemini додає висновки, де окремо виділено факти й припущення. Надсилається в Telegram. |
-| **Player risk alerts** | щодня 09:00 | Digest підозрілих гравців у Telegram (HIGH і MEDIUM), псевдонімізований список у Google Sheets, журнал відправлених алертів у базі (без повторів). |
-
-Звіт можна додатково надсилати листом (нода Gmail після `Format report`).
-
-Якщо LLM недоступна, тижневий звіт усе одно надсилається з розрахунковою частиною, а замість висновків додається примітка, що AI-висновки недоступні.
-
-## Архітектура
-
+| **Weekly health report** | every Monday 09:00 | Week-over-week metrics (GGR, RTP, stakes, bet count, average bet, active players, bonus bet share, GGR margin), RDC D7, and daily RTP anomalies. It also includes the top 3 biggest daily player wins (under pseudonyms), so that a fact can be told apart from an assumption about the cause of an anomaly. Gemini adds conclusions, with facts and assumptions separated. Sent to Telegram. |
+| **Player risk alerts** | every day 09:00 | A digest of suspicious players in Telegram (HIGH and MEDIUM), a pseudonymized list in Google Sheets, and a log of sent alerts in the database (no repeats). |
+ 
+The report can optionally also be sent by email (a Gmail node after `Format report`).
+ 
+If the LLM is unavailable, the weekly report is still sent with its calculated part, and a note replaces the conclusions saying that the AI insights are unavailable.
+ 
+## Architecture
+ 
 ```
 Neon (PostgreSQL)
-   │  SQL рахує метрики й правила (детерміновано)
-   ▼
-n8n (Docker, локально)
-   ├─ Weekly report:  Schedule → SQL payload → Code (prompt) → Gemini → Code (звіт) → Telegram
-   └─ Alerts:         Schedule → SQL правила ─┬→ Code (digest) → Telegram → Code (insert) → alerts_sent
-                                              └→ Code (лише псевдонім) → Google Sheets
+   |  SQL calculates metrics and rules (deterministic)
+   v
+n8n (Docker, local)
+   |- Weekly report:  Schedule > SQL payload > Code (prompt) > Gemini > Code (report) > Telegram
+   `- Alerts:         Schedule > SQL rules --+-> Code (digest) > Telegram > Code (insert) > alerts_sent
+                                             `-> Code (alias only) > Google Sheets
 ```
-
-Принципи:
-- **SQL рахує, LLM лише пояснює.** Усі числа з бази. Gemini отримує готовий JSON і має заборону вигадувати нові метрики.
-- **Пороги в одному місці** (CTE `p` на початку SQL), щоб їх легко змінювати.
-- **Дедуплікація:** таблиця `alerts_sent`, той самий гравець з тим самим рівнем не надсилається повторно 30 днів.
-- **Мінімум прав:** n8n працює під окремою роллю `n8n_monitor` (читання потрібних таблиць, запис лише в `alerts_sent`). Таблиця `ground_truth` для неї недоступна.
-
-## Дані
-
-Генератор `generate_synthetic.py` створює 3000 гравців за 70 днів (10 тижнів) з фіксованим seed.
-
-Таблиці: `players` (з `device_id`, `ftd_date`), `player_game_daily`, `player_cash_daily`, view `daily_performance`, а також `ground_truth` (правильні мітки лише для оцінки правил).
-
-У дані свідомо додано:
-- **102 справжніх «арбузерів»:** bonus_abuser (30), fast_withdrawal (30), multi_account (32), win_spike (10);
-- **85 легітимних «схожих»** (decoys): бонусолюби, хайролери, гравці зі спільним пристроєм, щасливі виграші. Вони перевіряють, що правила не шумлять на нормальній поведінці.
-
-## Метрики (робочі визначення, їх затверджує власник метрик)
-
-- `stake` = реальні + бонусні ставки; `GGR` = ставки − виграші.
-- `RTP` тижня = SUM(win) / SUM(stake). Це зважений, а не середнє по днях.
-- `bonus_share` = бонусні ставки / усі ставки.
-- Активні гравці рахуються як унікальні за тиждень з рівня гравця, а не сума по днях.
-- **RDC D7 (Return Deposit Count):** серед гравців із FTD у тижні, які після FTD робили ставки реальними грошима, частка тих, хто зробив другий депозит протягом 7 днів. У когорту входять лише «дозрілі» FTD (від FTD минуло не менше 7 днів).
-- Аномалії RTP: відхилення за днями від попередніх 8 тижнів по категорії, |z| від 3.
-
-## Правила підозрілої поведінки
-
-| Правило | Умова за замовчуванням |
+ 
+Principles:
+- **SQL counts, the LLM only explains.** All numbers come from the database. Gemini receives a finished JSON and is forbidden from inventing new metrics.
+- **Thresholds in one place** (CTE `p` at the start of the SQL), so they are easy to change.
+- **Deduplication:** the `alerts_sent` table; the same player with the same level is not sent again for 30 days.
+- **Least privilege:** n8n runs under a dedicated role, `n8n_monitor` (read access to the required tables, write access only to `alerts_sent`). The `ground_truth` table is not accessible to it.
+## Data
+ 
+The generator `generate_synthetic.py` creates 3,000 players over 70 days (10 weeks) with a fixed seed.
+ 
+Tables: `players` (with `device_id`, `ftd_date`), `player_game_daily`, `player_cash_daily`, the view `daily_performance`, and `ground_truth` (correct labels, used only to evaluate the rules).
+ 
+The data deliberately includes:
+- **102 real "abusers":** bonus_abuser (30), fast_withdrawal (30), multi_account (32), win_spike (10);
+- **85 legitimate look-alikes** (decoys): bonus lovers, high rollers, players sharing a device, lucky winners. They check that the rules do not raise noise on normal behavior.
+## Metrics (working definitions, to be approved by the metric owner)
+ 
+- `stake` = real + bonus bets; `GGR` = stakes - wins.
+- Weekly `RTP` = SUM(win) / SUM(stake). This is a weighted value, not an average of daily values.
+- `bonus_share` = bonus bets / all bets.
+- Active players are counted as unique players per week at player level, not as a sum over days.
+- **RDC D7 (Return Deposit Count):** among players with an FTD in the week who placed real-money bets after the FTD, the share who made a second deposit within 7 days. Only "mature" FTDs are included in the cohort (at least 7 days since the FTD).
+- RTP anomalies: daily deviation from the previous 8 weeks by category, |z| >= 3.
+## Suspicious behavior rules
+ 
+| Rule | Default condition |
 |---|---|
-| `bonus_share` | частка бонусних ставок ≥ 0,75 за вікно, обсяг ставок ≥ 100 |
-| `big_win` | чистий виграш за день ≥ 5000 |
-| `fast_withdrawal` | вивід ≥ 80% депозиту за 0-1 день при ставках ≤ 1,5× депозиту, щонайменше 2 цикли |
-| `multi_account` | 3 і більше акаунтів на одному `device_id` |
-
-Рівень: **HIGH**, якщо спрацювало ≥ 2 правил або будь-яке, крім `big_win`; **MEDIUM**, якщо лише `big_win`.
-
-## Результати оцінки на синтетичних даних
-
-Запит `sql/15_rule_evaluation.sql`, вікно 70 днів, порівняння з `ground_truth`:
-
-| Показник | Значення |
+| `bonus_share` | bonus bet share >= 0.75 over the window, stake volume >= 100 |
+| `big_win` | net win per day >= 5000 |
+| `fast_withdrawal` | withdrawal >= 80% of the deposit within 0-1 days with stakes <= 1.5x the deposit, at least 2 cycles |
+| `multi_account` | 3 or more accounts on one `device_id` |
+ 
+Level: **HIGH** if two or more rules fire, or any rule other than `big_win`; **MEDIUM** if only `big_win` fires.
+ 
+## Evaluation results on synthetic data
+ 
+Query `sql/15_rule_evaluation.sql`, 70-day window, compared with `ground_truth`:
+ 
+| Metric | Value |
 |---|---|
-| Recall (знайдено з 102 справжніх) | 101 (99,0%) |
-| Precision всіх алертів | 101 з 109 (92,7%) |
-| Precision рівня HIGH | 92 з 92 (100%) |
-| Precision рівня MEDIUM | 9 з 17 (52,9%) |
-| Хибні алерти на 85 легітимних схожих | 0 |
-
-## Обмеження
-
-- **Пороги підбирались, знаючи параметри генератора**, тому 99% recall це верхня оцінка. На реальних даних результат буде гіршим, і пороги треба переналаштовувати.
-- Синтетичні «арбузери» простіші за справжніх: кожен поводиться за одним сценарієм. Реальні схеми комбінують кілька сигналів.
-- `big_win` за порогом 5000 дає хибні спрацювання на звичайних гравцях із великим виграшем, тому це лише MEDIUM, «подивитись».
-- Правило «безпечних ставок» (мінімальні ставки на протилежні результати) не реалізовано, бо воно не видно на рівні дня.
-- n8n працює локально в Docker. Розклад спрацьовує, лише коли контейнер запущений.
-
-## Приватність і безпека
-
-- У Telegram і Google Sheets надсилається лише **псевдонім** `player_ref`: перші 12 символів SHA-256 від секретної солі й `player_id`. Сіль зберігається в таблиці `ref_salt` у базі. Зворотний пошук виконує власник бази (`sql/22_lookup_player_ref.sql`).
-- Псевдонімізація не є анонімізацією: хто має доступ до бази й солі, може знайти гравця.
-- Паролі, токени й ключі зберігаються лише в credentials n8n. У JSON воркфлоу їх немає. Перед публікацією заміни `REPLACE_WITH_CHAT_ID` на плейсхолдер.
-- Перенесення на робочий проєкт: спершу погодити з безпекою чи керівником, чи можна слати дані в Telegram, Google Sheets і LLM. Для робочих даних LLM краще вимкнути й залишити лише розрахункову частину, а замість публічних каналів використовувати дозволені корпоративні.
-
-## Як запустити
-
-1. `pip install -r requirements.txt`, скопіюй `.env.example` у `.env` і вкажи свій `SYNTH_DATABASE_URL`.
-2. `python generate_synthetic.py --write` створює таблиці в окремій синтетичній базі (без `--write` лише CSV у `out/`).
-3. У SQL Editor виконай `sql/20_roles_and_alert_log.sql` (задай пароль ролі самостійно) і `sql/21_player_ref_salt.sql`.
-4. У n8n створи credentials: Postgres (роль `n8n_monitor`, SSL Require), Telegram, Google Gemini (PaLM) API, Google Sheets (OAuth).
-5. Імпортуй `n8n/workflow_weekly_health_report.json` і `n8n/workflow_player_risk_alerts.json` (вставка на порожнє полотно), обери credentials, вкажи chat ID, у Google Sheets додай аркуш із заголовками `player_ref`, `severity`, `n_rules`, `signals`, `as_of`.
-6. Запусти **Manual test**, потім активуй воркфлоу.
-
-## Структура
-
+| Recall (found out of 102 real cases) | 101 (99.0%) |
+| Precision of all alerts | 101 of 109 (92.7%) |
+| Precision of the HIGH level | 92 of 92 (100%) |
+| Precision of the MEDIUM level | 9 of 17 (52.9%) |
+| False alerts on the 85 legitimate look-alikes | 0 |
+ 
+## Limitations
+ 
+- **The thresholds were tuned with knowledge of the generator's parameters**, so 99% recall is an upper bound. On real data the result will be worse, and the thresholds will need re-tuning.
+- Synthetic "abusers" are simpler than real ones: each follows a single scenario. Real schemes combine several signals.
+- `big_win` with a threshold of 5000 produces false alerts on ordinary players who have a large win, which is why it is only MEDIUM ("take a look").
+- The "safe bets" rule (minimal bets on opposite outcomes) is not implemented, because it is not visible at day level.
+- n8n runs locally in Docker. The schedule only fires while the container is running.
+## Privacy and security
+ 
+- Only a **pseudonym** `player_ref` is sent to Telegram and Google Sheets: the first 12 characters of SHA-256 of a secret salt and `player_id`. The salt is stored in the `ref_salt` table in the database. Reverse lookup is done by the database owner (`sql/22_lookup_player_ref.sql`).
+- Pseudonymization is not anonymization: whoever has access to the database and the salt can identify a player.
+- Passwords, tokens and keys are stored only in n8n credentials. They are not in the workflow JSON. Before publishing, replace `REPLACE_WITH_CHAT_ID` with a placeholder.
+- Moving to a production project: first agree with security or management whether data may be sent to Telegram, Google Sheets and an LLM. For production data it is better to disable the LLM and keep only the calculated part, and to use approved corporate channels instead of public ones.
+## How to run
+ 
+1. `pip install -r requirements.txt`, copy `.env.example` to `.env` and set your `SYNTH_DATABASE_URL`.
+2. `python generate_synthetic.py --write` creates the tables in a separate synthetic database (without `--write` it only writes CSV files to `out/`).
+3. In the SQL Editor, run `sql/20_roles_and_alert_log.sql` (set the role password yourself) and `sql/21_player_ref_salt.sql`.
+4. In n8n, create credentials: Postgres (role `n8n_monitor`, SSL Require), Telegram, Google Gemini (PaLM) API, Google Sheets (OAuth).
+5. Import `n8n/workflow_weekly_health_report.json` and `n8n/workflow_player_risk_alerts.json` (paste onto an empty canvas), choose the credentials, set the chat ID, and in Google Sheets add a sheet with the headers `player_ref`, `severity`, `n_rules`, `signals`, `as_of`.
+6. Run **Manual test**, then activate the workflows.
+## Structure
+ 
 ```
-generate_synthetic.py       генератор синтетичних даних
-sql/01-05                   тижневі метрики, категорії, аномалії RTP, RDC
-sql/10, 12                  розробка правил (12 використовує ground_truth)
-sql/13                      production-запит алертів
-sql/14                      payload для тижневого звіту
-sql/15                      оцінка правил проти ground_truth
-sql/20-22                   роль, журнал алертів, псевдонімізація
-n8n/                        воркфлоу (JSON) і скрипти, що їх збирають
+generate_synthetic.py       synthetic data generator
+sql/01-05                   weekly metrics, categories, RTP anomalies, RDC
+sql/10, 12                  rule development (12 uses ground_truth)
+sql/13                      production alert query
+sql/14                      payload for the weekly report
+sql/15                      rule evaluation against ground_truth
+sql/20-22                   role, alert log, pseudonymization
+n8n/                        workflows (JSON) and the scripts that build them
 ```
+ 
+Claude finished the response
