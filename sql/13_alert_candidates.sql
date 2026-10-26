@@ -1,10 +1,10 @@
--- ПРОДАКШН-запит для n8n: кого сповіщати в Telegram.
--- Пороги затверджені: бонус-частка >= 0.75 (мін. обіг 100), чистий виграш за день >= 5000,
--- швидкий вивід (>=80% депозиту за 0-1 день, реальні ставки <= 1.5x депозиту, >= 2 цикли),
--- >= 3 акаунти на одному пристрої.
--- Рівні: HIGH = 2+ правила АБО одне з (bonus_share, fast_withdrawal, multi_account);
---        MEDIUM = лише big_win.
--- Дедуплікація: той самий гравець з тим самим рівнем не повторюється dedupe_days днів (таблиця alerts_sent).
+-- PRODUCTION query for n8n: who to notify about in Telegram.
+-- Approved thresholds: bonus share >= 0.75 (min. turnover 100), net win per day >= 5000,
+-- fast withdrawal (>=80% of the deposit within 0-1 days, real stakes <= 1.5x the deposit, >= 2 cycles),
+-- >= 3 accounts on one device.
+-- Levels: HIGH = 2+ rules OR one of (bonus_share, fast_withdrawal, multi_account);
+--         MEDIUM = big_win only.
+-- Deduplication: the same player with the same level is not repeated for dedupe_days days (table alerts_sent).
 WITH p AS (
     SELECT (SELECT MAX(activity_date) FROM player_game_daily) AS as_of,
            7     AS window_days,

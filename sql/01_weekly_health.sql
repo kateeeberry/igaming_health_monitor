@@ -1,7 +1,7 @@
--- Тижневе порівняння здоров'я проєкту: останній повний тиждень проти попереднього.
--- Джерело: view daily_performance (агрегат player_game_daily) + player_game_daily для унікальних гравців.
--- Визначення (затвердити!): bet_amount = реальні + бонусні ставки; ggr = bet_amount - win_amount;
--- RTP тижня = SUM(win)/SUM(bet_amount), а не середнє rtp_pct по днях.
+-- Weekly project health comparison: the last full week vs the previous one.
+-- Source: view daily_performance (aggregate of player_game_daily) + player_game_daily for unique players.
+-- Definitions (to be approved!): bet_amount = real + bonus bets; ggr = bet_amount - win_amount;
+-- Weekly RTP = SUM(win)/SUM(bet_amount), not the average of daily rtp_pct.
 WITH wk AS (
     SELECT week_num,
            SUM(bet_amount)                                             AS stake,

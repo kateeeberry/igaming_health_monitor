@@ -1,6 +1,6 @@
--- Виконати ОДИН РАЗ (Neon SQL Editor). Псевдонім гравця для зовнішніх каналів (Telegram, Google Sheets).
--- Секретна «сіль» живе лише в базі; без неї за player_ref не відновити player_id.
--- НЕ показуй значення солі в чаті/GitHub і не міняй її без потреби (зміниться вся відповідність).
+-- Run ONCE (Neon SQL Editor). Player pseudonym for external channels (Telegram, Google Sheets).
+-- The secret "salt" lives only in the database; without it player_id cannot be recovered from player_ref.
+-- Do NOT show the salt value in chat/GitHub and do not change it without need (the whole mapping would change).
 CREATE TABLE IF NOT EXISTS ref_salt (
     id   INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     salt TEXT NOT NULL

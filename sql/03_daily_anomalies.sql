@@ -1,5 +1,5 @@
--- Денні відхилення RTP за останні 14 днів відносно попередніх 8 тижнів (по категорії).
--- z = (rtp дня - середній rtp базового періоду) / stddev базового періоду. Показуємо |z| >= 3.
+-- Daily RTP deviations over the last 14 days vs the previous 8 weeks (by category).
+-- z = (daily rtp - mean rtp of the baseline period) / stddev of the baseline period. We show |z| >= 3.
 WITH d AS (
     SELECT report_date, game_category, rtp_pct, ggr
     FROM daily_performance

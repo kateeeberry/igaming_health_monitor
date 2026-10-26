@@ -1,4 +1,4 @@
-"""Збирає n8n/workflow_player_risk_alerts.json (імпортується в n8n через Import from File)."""
+"""Builds n8n/workflow_player_risk_alerts.json (import into n8n via Import from File)."""
 import json, uuid, pathlib
 
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -7,12 +7,12 @@ if sql.endswith(";"):
     sql = sql[:-1]
 
 BUILD_DIGEST = r"""
-// Збираємо ОДИН дайджест на запуск, щоб перший запуск (накопичена історія) не засипав чат.
+// Build ONE digest per run so the first run (accumulated history) does not flood the chat.
 const rows = $input.all().map(i => i.json);
 const high = rows.filter(r => r.severity === 'HIGH');
 const medium = rows.filter(r => r.severity === 'MEDIUM');
 const asOf = rows[0].as_of;
-const line = r => `• ${r.player_ref}: ${r.signals}`;   // у зовнішні канали йде лише псевдонім
+const line = r => `• ${r.player_ref}: ${r.signals}`;   // only the pseudonym goes to external channels
 
 let text = `Player risk digest (${asOf})\nHIGH: ${high.length} | MEDIUM: ${medium.length}`;
 if (high.length) {
@@ -27,7 +27,7 @@ return [{ json: { text, rows } }];
 """.strip()
 
 BUILD_INSERT = r"""
-// Запис у журнал ТІЛЬКИ після успішної відправки (цей вузол стоїть після Telegram).
+// Write to the log ONLY after a successful send (this node comes after Telegram).
 const rows = $('Build digest').first().json.rows;
 const esc = s => String(s).replace(/'/g, "''");
 const values = rows
@@ -38,7 +38,7 @@ return [{ json: { insert_sql: `INSERT INTO alerts_sent (player_id, severity, sig
 
 
 SHEETS_ROWS = r"""
-// Для Google Sheets: ТІЛЬКИ псевдонім і сигнали. player_id навмисно не передаємо.
+// For Google Sheets: ONLY the pseudonym and signals. player_id is deliberately not passed.
 return $input.all().map(i => ({ json: {
   player_ref: i.json.player_ref, severity: i.json.severity,
   n_rules: i.json.n_rules, signals: i.json.signals, as_of: i.json.as_of } }));
@@ -83,7 +83,7 @@ for a, b in [("Schedule 09:00", "Find suspicious players"), ("Manual test", "Fin
              ("Find suspicious players", "Build digest"), ("Build digest", "Send to Telegram"),
              ("Send to Telegram", "Build insert"), ("Build insert", "Save to alerts_sent")]:
     conn.update(link(a, b))
-# друга гілка від Find suspicious players: рядки для Sheets без player_id
+# second branch from Find suspicious players: rows for Sheets without player_id
 conn["Find suspicious players"]["main"][0].append({"node": "Sheets rows (anonymized)", "type": "main", "index": 0})
 
 wf = {"name": "Player risk alerts (daily)", "nodes": nodes, "connections": conn,

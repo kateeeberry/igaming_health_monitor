@@ -1,4 +1,4 @@
--- Розподіл інтервалів між FTD і другим депозитом (лише для когорти з дозрілим вікном 30 днів).
+-- Distribution of intervals between the FTD and the second deposit (only for the cohort with a mature 30-day window).
 WITH asof AS (
     SELECT GREATEST((SELECT MAX(activity_date) FROM player_game_daily),
                     (SELECT MAX(activity_date) FROM player_cash_daily)) AS d
@@ -20,11 +20,11 @@ second_dep AS (
     LEFT JOIN player_cash_daily d ON d.player_id = c.player_id
     GROUP BY c.player_id
 )
-SELECT CASE WHEN gap_days IS NULL OR gap_days > 30 THEN '5: не повернувся за 30 днів'
-            WHEN gap_days = 0 THEN '1: той самий день'
-            WHEN gap_days <= 3 THEN '2: 1-3 дні'
-            WHEN gap_days <= 7 THEN '3: 4-7 днів'
-            ELSE '4: 8-30 днів' END AS interval_bucket,
+SELECT CASE WHEN gap_days IS NULL OR gap_days > 30 THEN '5: did not return within 30 days'
+            WHEN gap_days = 0 THEN '1: same day'
+            WHEN gap_days <= 3 THEN '2: 1-3 days'
+            WHEN gap_days <= 7 THEN '3: 4-7 days'
+            ELSE '4: 8-30 days' END AS interval_bucket,
        COUNT(*) AS players,
        ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS share_pct
 FROM second_dep

@@ -1,17 +1,17 @@
--- ТІЛЬКИ ДЛЯ РОЗРОБКИ: правила з 10_abuse_rules.sql + оцінка проти ground_truth в одному скрипті (temp-таблиця flagged).
-DROP TABLE IF EXISTS flagged; CREATE TEMP TABLE flagged AS -- Правила виявлення підозрілої поведінки. ДЕТЕРМІНОВАНІ: ground_truth тут НЕ використовується.
--- Пороги на початку (CTE p), у проєкті їх буде перенесено в YAML-конфіг.
--- window_days: 7 для щоденного запуску алертів; 70 -- для оцінки правил на всій історії.
+-- DEVELOPMENT ONLY: rules from 10_abuse_rules.sql + evaluation against ground_truth in one script (temp table flagged).
+DROP TABLE IF EXISTS flagged; CREATE TEMP TABLE flagged AS -- Suspicious behavior detection rules. DETERMINISTIC: ground_truth is NOT used here.
+-- Thresholds are at the top (CTE p); in a real project they would be moved to a YAML config.
+-- window_days: 7 for the daily alert run; 70 to evaluate the rules over the whole history.
 WITH p AS (
     SELECT (SELECT MAX(activity_date) FROM player_game_daily) AS as_of,
            70    AS window_days,
-           0.75  AS bonus_share_min,      -- частка бонусних ставок
-           100   AS bonus_min_stake,      -- мінімальний обсяг ставок для цього правила
-           5000  AS bigwin_net_min,       -- чистий виграш за день (win - stake)
-           0.8   AS fw_withdraw_ratio,    -- вивід >= 80% депозиту за 0-1 день
-           1.5   AS fw_turnover_ratio,    -- реальні ставки <= 1.5x депозиту
-           2     AS fw_cycles_min,        -- мінімум циклів
-           3     AS device_accounts_min   -- акаунтів на одному пристрої
+           0.75  AS bonus_share_min,      -- share of bonus bets
+           100   AS bonus_min_stake,      -- minimum stake volume for this rule
+           5000  AS bigwin_net_min,       -- net win per day (win - stake)
+           0.8   AS fw_withdraw_ratio,    -- withdrawal >= 80% of the deposit within 0-1 days
+           1.5   AS fw_turnover_ratio,    -- real stakes <= 1.5x the deposit
+           2     AS fw_cycles_min,        -- minimum number of cycles
+           3     AS device_accounts_min   -- accounts on one device
 ),
 r_bonus AS (
     SELECT g.player_id, 'bonus_share' AS rule,
@@ -65,9 +65,9 @@ SELECT player_id,
 FROM signals
 GROUP BY player_id
 ;
--- ТІЛЬКИ ДЛЯ РОЗРОБКИ: оцінка правил проти ground_truth (у n8n-воркфлоу ця таблиця не використовується).
--- Вставте запит 10_abuse_rules.sql замість <<RULES>> або запустіть через view/psql \i.
--- Тут: спрощений спосіб -- запускаємо 10_abuse_rules як CTE-результат у тимчасовій таблиці.
+-- DEVELOPMENT ONLY: evaluation of the rules against ground_truth (this table is not used in the n8n workflows).
+-- Insert the 10_abuse_rules.sql query in place of <<RULES>> or run it via a view/psql \i.
+-- Here: a simplified approach -- we run 10_abuse_rules as a CTE result in a temporary table.
 SELECT t.pattern,
        COUNT(*) AS players,
        COUNT(*) FILTER (WHERE f.player_id IS NOT NULL) AS flagged_any,

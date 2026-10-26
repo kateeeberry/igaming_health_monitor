@@ -1,4 +1,4 @@
-"""Збирає n8n/workflow_weekly_health_report.json (вставка через Cmd+V на полотні n8n)."""
+"""Builds n8n/workflow_weekly_health_report.json (paste onto the n8n canvas with Cmd+V)."""
 import json, uuid, pathlib
 
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -6,17 +6,18 @@ sql = (root / "sql" / "14_weekly_report_payload.sql").read_text(encoding="utf-8"
 
 PROMPT = r"""
 const payload = JSON.parse($input.first().json.payload);
-const prompt = `Ти аналітик iGaming. Нижче JSON з метриками проєкту: останній повний тиждень (cur) проти попереднього (prev).
-Визначення: stake = реальні + бонусні ставки; GGR = ставки - виграші; RTP = виграші / ставки за тиждень;
-bonus_share_pct = частка бонусних ставок; RDC D7 = частка гравців із FTD у тижні, що зробили другий депозит протягом 7 днів.
-Дані синтетичні. Використовуй ТІЛЬКИ числа з JSON, нічого не вигадуй і не рахуй нових метрик.
+const prompt = `You are an iGaming analyst. Below is a JSON with project metrics: the last full week (cur) vs the previous one (prev).
+Definitions: stake = real + bonus bets; GGR = stakes - wins; RTP = wins / stakes for the week;
+bonus_share_pct = share of bonus bets; RDC D7 = share of players with an FTD in the week who made a second deposit within 7 days.
+The data is synthetic. Use ONLY the numbers in the JSON; do not invent anything and do not calculate new metrics.
+Do not introduce player segments, labels or terms that are not in the JSON (for example, do not mention VIP players).
 
-Напиши звіт українською, до 1500 символів, звичайним текстом без Markdown і без HTML, у такій структурі:
-1) Факти: 3-5 ключових змін (число, напрямок, % зміни).
-2) Припущення (позначай явно словом «припущення» і не подавай як факт): можливі причини змін.
-3) Три бізнес-висновки.
-4) Рекомендації: 2-3 конкретні дії.
-Якщо є аномалія RTP за днем, обов'язково згадай її в фактах. Порівняй її з top_player_day_net_wins: якщо чистий виграш одного гравця (player_ref) співмірний із від'ємним GGR дня, напиши це ФАКТОМ із числами; не вгадуй причин, яких немає в JSON.
+Write the report in English, up to 1500 characters, plain text without Markdown or HTML, in this structure:
+1) Facts: 3-5 key changes (number, direction, % change).
+2) Assumptions (mark them explicitly with the word "assumption" and do not present them as fact): possible causes of the changes.
+3) Three business conclusions.
+4) Recommendations: 2-3 concrete actions.
+If there is a daily RTP anomaly, be sure to mention it in the facts. Compare it with top_player_day_net_wins: if one player's (player_ref) net win is comparable to the day's negative GGR, state this as a FACT with the numbers; do not guess causes that are not in the JSON.
 
 JSON:
 ${JSON.stringify(payload)}`;
@@ -25,29 +26,29 @@ return [{ json: { prompt, period_end: payload.period_end, payload,
 """.strip()
 
 AFTER = r"""
-// Суха частина ЗАВЖДИ будується з розрахунків; текст Gemini додається, лише якщо він є.
+// The plain part is ALWAYS built from the calculations; the Gemini text is added only if it exists.
 const g = $input.first().json;
 const { payload, period_end } = $('Build prompt').first().json;
-const names = { ggr: 'GGR', rtp_pct: 'RTP, %', stake: 'Ставки', bets_count: 'К-сть ставок', avg_bet: 'Середня ставка',
-  active_players: 'Активні гравці', bonus_share_pct: 'Частка бонусних ставок, %', ggr_margin_pct: 'GGR margin, %' };
+const names = { ggr: 'GGR', rtp_pct: 'RTP, %', stake: 'Total stakes', bets_count: 'Bet count', avg_bet: 'Average bet',
+  active_players: 'Active players', bonus_share_pct: 'Bonus bet share, %', ggr_margin_pct: 'GGR margin, %' };
 const f = v => Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const sign = v => (v > 0 ? '+' : '') + v;
-let text = `Weekly health update (до ${period_end})\nТиждень проти попереднього:\n`;
+let text = `Weekly health update (through ${period_end})\nWeek vs previous week:\n`;
 text += payload.metrics.map(m => `• ${names[m.metric] || m.metric}: ${f(m.prev_value)} → ${f(m.cur_value)} (${sign(m.pct_change)}%)`).join('\n');
 if (payload.rdc_d7_by_ftd_week?.length) {
-  text += '\n\nRDC D7 (когорта за тижнем FTD):\n' + payload.rdc_d7_by_ftd_week
-    .map(r => `• тиждень ${r.ftd_week}: ${r.rdc_d7_pct}% (когорта ${r.cohort_size})`).join('\n');
+  text += '\n\nRDC D7 (cohort by first-deposit week):\n' + payload.rdc_d7_by_ftd_week
+    .map(r => `• week ${r.ftd_week}: ${r.rdc_d7_pct}% (cohort size ${r.cohort_size})`).join('\n');
 }
 if (payload.rtp_daily_anomalies?.length) {
-  text += '\n\nАномалії RTP (|z| від 3):\n' + payload.rtp_daily_anomalies
+  text += '\n\nRTP anomalies (|z| ≥ 3):\n' + payload.rtp_daily_anomalies
     .map(a => `• ${a.report_date} ${a.game_category}: RTP ${a.rtp_pct}% (z=${a.z_score})`).join('\n');
 }
-const ai = g.candidates?.[0]?.content?.parts?.map(p => p.text).join('')   // HTTP-вузол
-        ?? g.content?.parts?.map(p => p.text).join('')                      // вузол Google Gemini
+const ai = g.candidates?.[0]?.content?.parts?.map(p => p.text).join('')   // HTTP node
+        ?? g.content?.parts?.map(p => p.text).join('')                      // Google Gemini node
         ?? g.text;
 text += ai
-  ? `\n\nAI-висновки (Gemini):\n${ai}`
-  : '\n\n(AI-висновки недоступні цього разу: показано лише розрахунки.)';
+  ? `\n\nAI insights (Gemini):\n${ai}`
+  : '\n\n(AI insights unavailable this time: calculations only.)';
 return [{ json: { text: text.slice(0, 4000) } }];
 """.strip()
 

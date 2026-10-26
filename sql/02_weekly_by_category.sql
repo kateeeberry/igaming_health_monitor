@@ -1,4 +1,4 @@
--- Той самий тиждень проти попереднього, але по категоріях гри (звідки зміна).
+-- The same week vs the previous one, but by game category (where the change comes from).
 WITH w AS (
     SELECT week_num, game_category,
            SUM(bet_amount) AS stake, SUM(win_amount) AS win, SUM(ggr) AS ggr,

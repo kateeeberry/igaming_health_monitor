@@ -1,5 +1,5 @@
--- Єдиний payload для тижневого звіту (одним рядком JSON): метрики, RDC D7, аномалії RTP.
--- Тиждень = 7 днів від 2026-08-10 (week_num). RDC D7: когорта за тижнем FTD, лише дозріла (ftd+7 <= остання дата).
+-- Single payload for the weekly report (one JSON row): metrics, RDC D7, RTP anomalies.
+-- Week = 7 days from 2026-08-10 (week_num). RDC D7: cohort by FTD week, mature only (ftd+7 <= last date).
 WITH metrics AS (
 WITH wk AS (
     SELECT week_num,
@@ -63,7 +63,7 @@ rdc AS (
 ),
 rdc2 AS (SELECT * FROM rdc WHERE ftd_week >= (SELECT MAX(ftd_week) FROM rdc) - 1),
 topwins AS (
-    -- найбільші чисті виграші гравця за день за останні 14 днів (псевдонім замість player_id)
+    -- biggest net daily wins per player over the last 14 days (pseudonym instead of player_id)
     SELECT LEFT(encode(sha256(convert_to((SELECT salt FROM ref_salt) || g.player_id, 'UTF8')), 'hex'), 12) AS player_ref,
            g.activity_date::text AS day,
            ROUND(SUM(g.win_amount) - SUM(g.real_bet_amount + g.bonus_bet_amount), 0) AS day_net

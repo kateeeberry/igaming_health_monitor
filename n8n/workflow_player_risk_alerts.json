@@ -12,7 +12,7 @@
           ]
         }
       },
-      "id": "d11cd9cf-0588-4d48-b9cc-04418364be50",
+      "id": "16a75f01-067c-4655-8a67-ae4806e6fdce",
       "name": "Schedule 09:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -23,7 +23,7 @@
     },
     {
       "parameters": {},
-      "id": "2f8ed809-106a-460d-a9a7-7986fadd7e45",
+      "id": "093cf71c-1324-4e0d-bdb9-9e3715f41a40",
       "name": "Manual test",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -35,10 +35,10 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- ПРОДАКШН-запит для n8n: кого сповіщати в Telegram.\n-- Пороги затверджені: бонус-частка >= 0.75 (мін. обіг 100), чистий виграш за день >= 5000,\n-- швидкий вивід (>=80% депозиту за 0-1 день, реальні ставки <= 1.5x депозиту, >= 2 цикли),\n-- >= 3 акаунти на одному пристрої.\n-- Рівні: HIGH = 2+ правила АБО одне з (bonus_share, fast_withdrawal, multi_account);\n--        MEDIUM = лише big_win.\n-- Дедуплікація: той самий гравець з тим самим рівнем не повторюється dedupe_days днів (таблиця alerts_sent).\nWITH p AS (\n    SELECT (SELECT MAX(activity_date) FROM player_game_daily) AS as_of,\n           7     AS window_days,\n           30    AS dedupe_days,\n           0.75  AS bonus_share_min,\n           100   AS bonus_min_stake,\n           5000  AS bigwin_net_min,\n           0.8   AS fw_withdraw_ratio,\n           1.5   AS fw_turnover_ratio,\n           2     AS fw_cycles_min,\n           3     AS device_accounts_min\n),\nr_bonus AS (\n    SELECT g.player_id, 'bonus_share' AS rule,\n           ROUND(SUM(g.bonus_bet_amount) / SUM(g.real_bet_amount + g.bonus_bet_amount), 2) AS value\n    FROM player_game_daily g, p\n    WHERE g.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of\n    GROUP BY g.player_id\n    HAVING SUM(g.real_bet_amount + g.bonus_bet_amount) >= (SELECT bonus_min_stake FROM p)\n       AND SUM(g.bonus_bet_amount) / SUM(g.real_bet_amount + g.bonus_bet_amount) >= (SELECT bonus_share_min FROM p)\n),\nr_bigwin AS (\n    SELECT t.player_id, 'big_win' AS rule, ROUND(MAX(t.day_net), 0) AS value\n    FROM (SELECT g.player_id, g.activity_date,\n                 SUM(g.win_amount) - SUM(g.real_bet_amount + g.bonus_bet_amount) AS day_net\n          FROM player_game_daily g, p\n          WHERE g.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of\n          GROUP BY g.player_id, g.activity_date) t\n    GROUP BY t.player_id\n    HAVING MAX(t.day_net) >= (SELECT bigwin_net_min FROM p)\n),\ndep AS (\n    SELECT c.player_id, c.activity_date AS d, c.deposit_amount\n    FROM player_cash_daily c, p\n    WHERE c.deposit_amount > 0 AND c.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of\n),\nr_fast AS (\n    SELECT dep.player_id, 'fast_withdrawal' AS rule, COUNT(*)::numeric AS value\n    FROM dep\n    CROSS JOIN LATERAL (SELECT COALESCE(SUM(c.withdrawal_amount), 0) AS w FROM player_cash_daily c\n                        WHERE c.player_id = dep.player_id AND c.activity_date BETWEEN dep.d AND dep.d + 1) w\n    CROSS JOIN LATERAL (SELECT COALESCE(SUM(g.real_bet_amount), 0) AS r FROM player_game_daily g\n                        WHERE g.player_id = dep.player_id AND g.activity_date BETWEEN dep.d AND dep.d + 1) r\n    WHERE w.w >= (SELECT fw_withdraw_ratio FROM p) * dep.deposit_amount\n      AND r.r <= (SELECT fw_turnover_ratio FROM p) * dep.deposit_amount\n    GROUP BY dep.player_id\n    HAVING COUNT(*) >= (SELECT fw_cycles_min FROM p)\n),\nr_device AS (\n    SELECT pl.player_id, 'multi_account' AS rule, dc.accounts::numeric AS value\n    FROM players pl\n    JOIN (SELECT device_id, COUNT(*) AS accounts FROM players GROUP BY device_id) dc USING (device_id)\n    WHERE dc.accounts >= (SELECT device_accounts_min FROM p)\n      AND EXISTS (SELECT 1 FROM player_game_daily g, p\n                  WHERE g.player_id = pl.player_id AND g.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of)\n),\nsignals AS (\n    SELECT * FROM r_bonus UNION ALL SELECT * FROM r_bigwin UNION ALL SELECT * FROM r_fast UNION ALL SELECT * FROM r_device\n),\nagg AS (\n    SELECT player_id,\n           COUNT(*) AS n_rules,\n           STRING_AGG(rule || '=' || value, ', ' ORDER BY rule) AS signals,\n           BOOL_OR(rule <> 'big_win') AS has_strong_rule\n    FROM signals\n    GROUP BY player_id\n),\nleveled AS (\n    SELECT a.*, CASE WHEN a.n_rules >= 2 OR a.has_strong_rule THEN 'HIGH' ELSE 'MEDIUM' END AS severity\n    FROM agg a\n)\nSELECT l.player_id,\n       LEFT(encode(sha256(convert_to((SELECT salt FROM ref_salt) || l.player_id, 'UTF8')), 'hex'), 12) AS player_ref,\n       l.severity, l.n_rules, l.signals, TO_CHAR((SELECT as_of FROM p), 'YYYY-MM-DD') AS as_of\nFROM leveled l\nWHERE NOT EXISTS (\n    SELECT 1 FROM alerts_sent s, p\n    WHERE s.player_id = l.player_id AND s.severity = l.severity\n      AND s.sent_at >= (p.as_of - p.dedupe_days)::timestamp\n)\nORDER BY (l.severity = 'HIGH') DESC, l.n_rules DESC, l.player_id",
+        "query": "-- PRODUCTION query for n8n: who to notify about in Telegram.\n-- Approved thresholds: bonus share >= 0.75 (min. turnover 100), net win per day >= 5000,\n-- fast withdrawal (>=80% of the deposit within 0-1 days, real stakes <= 1.5x the deposit, >= 2 cycles),\n-- >= 3 accounts on one device.\n-- Levels: HIGH = 2+ rules OR one of (bonus_share, fast_withdrawal, multi_account);\n--         MEDIUM = big_win only.\n-- Deduplication: the same player with the same level is not repeated for dedupe_days days (table alerts_sent).\nWITH p AS (\n    SELECT (SELECT MAX(activity_date) FROM player_game_daily) AS as_of,\n           7     AS window_days,\n           30    AS dedupe_days,\n           0.75  AS bonus_share_min,\n           100   AS bonus_min_stake,\n           5000  AS bigwin_net_min,\n           0.8   AS fw_withdraw_ratio,\n           1.5   AS fw_turnover_ratio,\n           2     AS fw_cycles_min,\n           3     AS device_accounts_min\n),\nr_bonus AS (\n    SELECT g.player_id, 'bonus_share' AS rule,\n           ROUND(SUM(g.bonus_bet_amount) / SUM(g.real_bet_amount + g.bonus_bet_amount), 2) AS value\n    FROM player_game_daily g, p\n    WHERE g.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of\n    GROUP BY g.player_id\n    HAVING SUM(g.real_bet_amount + g.bonus_bet_amount) >= (SELECT bonus_min_stake FROM p)\n       AND SUM(g.bonus_bet_amount) / SUM(g.real_bet_amount + g.bonus_bet_amount) >= (SELECT bonus_share_min FROM p)\n),\nr_bigwin AS (\n    SELECT t.player_id, 'big_win' AS rule, ROUND(MAX(t.day_net), 0) AS value\n    FROM (SELECT g.player_id, g.activity_date,\n                 SUM(g.win_amount) - SUM(g.real_bet_amount + g.bonus_bet_amount) AS day_net\n          FROM player_game_daily g, p\n          WHERE g.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of\n          GROUP BY g.player_id, g.activity_date) t\n    GROUP BY t.player_id\n    HAVING MAX(t.day_net) >= (SELECT bigwin_net_min FROM p)\n),\ndep AS (\n    SELECT c.player_id, c.activity_date AS d, c.deposit_amount\n    FROM player_cash_daily c, p\n    WHERE c.deposit_amount > 0 AND c.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of\n),\nr_fast AS (\n    SELECT dep.player_id, 'fast_withdrawal' AS rule, COUNT(*)::numeric AS value\n    FROM dep\n    CROSS JOIN LATERAL (SELECT COALESCE(SUM(c.withdrawal_amount), 0) AS w FROM player_cash_daily c\n                        WHERE c.player_id = dep.player_id AND c.activity_date BETWEEN dep.d AND dep.d + 1) w\n    CROSS JOIN LATERAL (SELECT COALESCE(SUM(g.real_bet_amount), 0) AS r FROM player_game_daily g\n                        WHERE g.player_id = dep.player_id AND g.activity_date BETWEEN dep.d AND dep.d + 1) r\n    WHERE w.w >= (SELECT fw_withdraw_ratio FROM p) * dep.deposit_amount\n      AND r.r <= (SELECT fw_turnover_ratio FROM p) * dep.deposit_amount\n    GROUP BY dep.player_id\n    HAVING COUNT(*) >= (SELECT fw_cycles_min FROM p)\n),\nr_device AS (\n    SELECT pl.player_id, 'multi_account' AS rule, dc.accounts::numeric AS value\n    FROM players pl\n    JOIN (SELECT device_id, COUNT(*) AS accounts FROM players GROUP BY device_id) dc USING (device_id)\n    WHERE dc.accounts >= (SELECT device_accounts_min FROM p)\n      AND EXISTS (SELECT 1 FROM player_game_daily g, p\n                  WHERE g.player_id = pl.player_id AND g.activity_date BETWEEN p.as_of - p.window_days + 1 AND p.as_of)\n),\nsignals AS (\n    SELECT * FROM r_bonus UNION ALL SELECT * FROM r_bigwin UNION ALL SELECT * FROM r_fast UNION ALL SELECT * FROM r_device\n),\nagg AS (\n    SELECT player_id,\n           COUNT(*) AS n_rules,\n           STRING_AGG(rule || '=' || value, ', ' ORDER BY rule) AS signals,\n           BOOL_OR(rule <> 'big_win') AS has_strong_rule\n    FROM signals\n    GROUP BY player_id\n),\nleveled AS (\n    SELECT a.*, CASE WHEN a.n_rules >= 2 OR a.has_strong_rule THEN 'HIGH' ELSE 'MEDIUM' END AS severity\n    FROM agg a\n)\nSELECT l.player_id,\n       LEFT(encode(sha256(convert_to((SELECT salt FROM ref_salt) || l.player_id, 'UTF8')), 'hex'), 12) AS player_ref,\n       l.severity, l.n_rules, l.signals, TO_CHAR((SELECT as_of FROM p), 'YYYY-MM-DD') AS as_of\nFROM leveled l\nWHERE NOT EXISTS (\n    SELECT 1 FROM alerts_sent s, p\n    WHERE s.player_id = l.player_id AND s.severity = l.severity\n      AND s.sent_at >= (p.as_of - p.dedupe_days)::timestamp\n)\nORDER BY (l.severity = 'HIGH') DESC, l.n_rules DESC, l.player_id",
         "options": {}
       },
-      "id": "9b704668-c3e1-4013-9c12-e8f87427df0d",
+      "id": "08fefe60-9add-4953-afdd-75692681aa2e",
       "name": "Find suspicious players",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
@@ -49,9 +49,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Для Google Sheets: ТІЛЬКИ псевдонім і сигнали. player_id навмисно не передаємо.\nreturn $input.all().map(i => ({ json: {\n  player_ref: i.json.player_ref, severity: i.json.severity,\n  n_rules: i.json.n_rules, signals: i.json.signals, as_of: i.json.as_of } }));"
+        "jsCode": "// For Google Sheets: ONLY the pseudonym and signals. player_id is deliberately not passed.\nreturn $input.all().map(i => ({ json: {\n  player_ref: i.json.player_ref, severity: i.json.severity,\n  n_rules: i.json.n_rules, signals: i.json.signals, as_of: i.json.as_of } }));"
       },
-      "id": "501bffb4-0b52-424c-9c41-aa566d0353c2",
+      "id": "5a4203c2-e892-4e2b-84e4-96947449ed15",
       "name": "Sheets rows (anonymized)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -62,9 +62,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Збираємо ОДИН дайджест на запуск, щоб перший запуск (накопичена історія) не засипав чат.\nconst rows = $input.all().map(i => i.json);\nconst high = rows.filter(r => r.severity === 'HIGH');\nconst medium = rows.filter(r => r.severity === 'MEDIUM');\nconst asOf = rows[0].as_of;\nconst line = r => `• ${r.player_ref}: ${r.signals}`;   // у зовнішні канали йде лише псевдонім\n\nlet text = `Player risk digest (${asOf})\\nHIGH: ${high.length} | MEDIUM: ${medium.length}`;\nif (high.length) {\n  text += `\\n\\nHIGH (top ${Math.min(10, high.length)}):\\n` + high.slice(0, 10).map(line).join('\\n');\n  if (high.length > 10) text += `\\n… and ${high.length - 10} more`;\n}\nif (medium.length) {\n  text += `\\n\\nMEDIUM (top ${Math.min(5, medium.length)}):\\n` + medium.slice(0, 5).map(line).join('\\n');\n  if (medium.length > 5) text += `\\n… and ${medium.length - 5} more`;\n}\nreturn [{ json: { text, rows } }];"
+        "jsCode": "// Build ONE digest per run so the first run (accumulated history) does not flood the chat.\nconst rows = $input.all().map(i => i.json);\nconst high = rows.filter(r => r.severity === 'HIGH');\nconst medium = rows.filter(r => r.severity === 'MEDIUM');\nconst asOf = rows[0].as_of;\nconst line = r => `• ${r.player_ref}: ${r.signals}`;   // only the pseudonym goes to external channels\n\nlet text = `Player risk digest (${asOf})\\nHIGH: ${high.length} | MEDIUM: ${medium.length}`;\nif (high.length) {\n  text += `\\n\\nHIGH (top ${Math.min(10, high.length)}):\\n` + high.slice(0, 10).map(line).join('\\n');\n  if (high.length > 10) text += `\\n… and ${high.length - 10} more`;\n}\nif (medium.length) {\n  text += `\\n\\nMEDIUM (top ${Math.min(5, medium.length)}):\\n` + medium.slice(0, 5).map(line).join('\\n');\n  if (medium.length > 5) text += `\\n… and ${medium.length - 5} more`;\n}\nreturn [{ json: { text, rows } }];"
       },
-      "id": "f0fdd9c3-5723-469f-a6ee-8aaf1c688bb4",
+      "id": "c0507815-4c87-4f2a-a59a-019fe2f6c6c8",
       "name": "Build digest",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -84,7 +84,7 @@
           "parse_mode": "HTML"
         }
       },
-      "id": "04a6f369-9df5-44bd-b9d0-7118f7099991",
+      "id": "25bc801c-ef98-4a5b-901b-5aea36086145",
       "name": "Send to Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -95,9 +95,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Запис у журнал ТІЛЬКИ після успішної відправки (цей вузол стоїть після Telegram).\nconst rows = $('Build digest').first().json.rows;\nconst esc = s => String(s).replace(/'/g, \"''\");\nconst values = rows\n  .map(r => `('${esc(r.player_id)}','${esc(r.severity)}','${esc(r.signals)}')`)\n  .join(',');\nreturn [{ json: { insert_sql: `INSERT INTO alerts_sent (player_id, severity, signals) VALUES ${values}` } }];"
+        "jsCode": "// Write to the log ONLY after a successful send (this node comes after Telegram).\nconst rows = $('Build digest').first().json.rows;\nconst esc = s => String(s).replace(/'/g, \"''\");\nconst values = rows\n  .map(r => `('${esc(r.player_id)}','${esc(r.severity)}','${esc(r.signals)}')`)\n  .join(',');\nreturn [{ json: { insert_sql: `INSERT INTO alerts_sent (player_id, severity, signals) VALUES ${values}` } }];"
       },
-      "id": "6cd43cb6-5c71-4341-8df7-e1deb4593631",
+      "id": "7456e62f-6552-4226-9f58-5a2da4428d4e",
       "name": "Build insert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -112,7 +112,7 @@
         "query": "={{ $json.insert_sql }}",
         "options": {}
       },
-      "id": "4fd49def-6810-48ca-8f29-ff553ea5bbc3",
+      "id": "f92ecefe-6fc8-4860-bb8a-fad588c09047",
       "name": "Save to alerts_sent",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,

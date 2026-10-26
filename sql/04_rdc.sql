@@ -1,8 +1,8 @@
--- RDC (Return Deposit Count): повернення з другим депозитом після FTD.
--- Затверджене робоче визначення:
---   когорта = гравці з FTD у вікні даних, які після FTD (включно з днем FTD) зробили >=1 ставку реальними грошима;
---   «повернувся за N днів» = другий депозит не пізніше ftd_date + N (другий депозит у день FTD = 0 днів);
---   для N беремо лише «дозрілу» когорту: ftd_date + N <= остання дата даних (інакше це не «не повернувся»).
+-- RDC (Return Deposit Count): return with a second deposit after the FTD.
+-- Approved working definition:
+--   cohort = players with an FTD in the data window who placed >=1 real-money bet after the FTD (including the FTD day);
+--   "returned within N days" = second deposit no later than ftd_date + N (a second deposit on the FTD day = 0 days);
+--   for N we take only the "mature" cohort: ftd_date + N <= last data date (otherwise it is not "did not return").
 WITH asof AS (
     SELECT GREATEST((SELECT MAX(activity_date) FROM player_game_daily),
                     (SELECT MAX(activity_date) FROM player_cash_daily)) AS d

@@ -1,16 +1,16 @@
--- ТІЛЬКИ ДЛЯ РОЗРОБКИ/ОЦІНКИ: наскільки правила знаходять підкинутих «арбузерів» і скільки хибних спрацювань дають.
--- Використовує ground_truth (у воркфлоу n8n вона НЕ використовується). Вікно 70 днів = вся історія.
--- Один запит, один результат: section / label / n_group / n_flagged / n_true_abusers_flagged / pct
+-- DEVELOPMENT/EVALUATION ONLY: how well the rules find the planted "abusers" and how many false alerts they produce.
+-- Uses ground_truth (it is NOT used in the n8n workflows). The 70-day window = the whole history.
+-- One query, one result: section / label / n_group / n_flagged / n_true_abusers_flagged / pct
 WITH p AS (
     SELECT (SELECT MAX(activity_date) FROM player_game_daily) AS as_of,
            70    AS window_days,
-           0.75  AS bonus_share_min,      -- частка бонусних ставок
-           100   AS bonus_min_stake,      -- мінімальний обсяг ставок для цього правила
-           5000  AS bigwin_net_min,       -- чистий виграш за день (win - stake)
-           0.8   AS fw_withdraw_ratio,    -- вивід >= 80% депозиту за 0-1 день
-           1.5   AS fw_turnover_ratio,    -- реальні ставки <= 1.5x депозиту
-           2     AS fw_cycles_min,        -- мінімум циклів
-           3     AS device_accounts_min   -- акаунтів на одному пристрої
+           0.75  AS bonus_share_min,      -- share of bonus bets
+           100   AS bonus_min_stake,      -- minimum stake volume for this rule
+           5000  AS bigwin_net_min,       -- net win per day (win - stake)
+           0.8   AS fw_withdraw_ratio,    -- withdrawal >= 80% of the deposit within 0-1 days
+           1.5   AS fw_turnover_ratio,    -- real stakes <= 1.5x the deposit
+           2     AS fw_cycles_min,        -- minimum number of cycles
+           3     AS device_accounts_min   -- accounts on one device
 ),
 r_bonus AS (
     SELECT g.player_id, 'bonus_share' AS rule,
@@ -69,21 +69,21 @@ SELECT '1_per_rule' AS section, s.rule AS label,
        NULL::bigint AS n_group,
        COUNT(*) AS n_flagged,
        COUNT(*) FILTER (WHERE t.is_abuser) AS n_true_abusers_flagged,
-       ROUND(100.0 * COUNT(*) FILTER (WHERE t.is_abuser) / COUNT(*), 1) AS pct   -- precision правила
+       ROUND(100.0 * COUNT(*) FILTER (WHERE t.is_abuser) / COUNT(*), 1) AS pct   -- rule precision
 FROM signals s JOIN ground_truth t USING (player_id)
 GROUP BY s.rule
 UNION ALL
 SELECT '2_by_pattern', pattern, COUNT(*), COUNT(*) FILTER (WHERE flagged),
        COUNT(*) FILTER (WHERE flagged AND is_abuser),
-       ROUND(100.0 * COUNT(*) FILTER (WHERE flagged) / COUNT(*), 1)        -- % гравців патерну, що отримали алерт
+       ROUND(100.0 * COUNT(*) FILTER (WHERE flagged) / COUNT(*), 1)        -- % of pattern players who got an alert
 FROM labeled GROUP BY pattern
 UNION ALL
-SELECT '3_overall', 'alerts (будь-яке правило)', COUNT(*), COUNT(*) FILTER (WHERE flagged),
+SELECT '3_overall', 'alerts (any rule)', COUNT(*), COUNT(*) FILTER (WHERE flagged),
        COUNT(*) FILTER (WHERE flagged AND is_abuser),
        ROUND(100.0 * COUNT(*) FILTER (WHERE flagged AND is_abuser) / NULLIF(COUNT(*) FILTER (WHERE flagged), 0), 1)  -- precision
 FROM labeled
 UNION ALL
-SELECT '3_overall', 'recall по справжніх арбузерах', COUNT(*) FILTER (WHERE is_abuser),
+SELECT '3_overall', 'recall on true abusers', COUNT(*) FILTER (WHERE is_abuser),
        COUNT(*) FILTER (WHERE is_abuser AND flagged), COUNT(*) FILTER (WHERE is_abuser AND flagged),
        ROUND(100.0 * COUNT(*) FILTER (WHERE is_abuser AND flagged) / NULLIF(COUNT(*) FILTER (WHERE is_abuser), 0), 1)
 FROM labeled
