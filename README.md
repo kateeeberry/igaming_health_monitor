@@ -1,6 +1,3 @@
-Claude
-/
-rivelk, Connected
 
 
 
